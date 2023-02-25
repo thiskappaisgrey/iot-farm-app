@@ -19,6 +19,8 @@ use embedded_graphics::{
     // mock_display::MockDisplay,
 };
 
+
+// TODO then, figure out how to use the i2c soil sensor
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
 
@@ -68,9 +70,6 @@ fn main() -> anyhow::Result<()> {
     let mut display = display.owned_noop_flushing();
     display.clear(Rgb565::BLACK).unwrap();
 
-
-    
-
     let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
 
     let backlight : AnyOutputPin = peripherals.pins.gpio45.into();
@@ -78,6 +77,8 @@ fn main() -> anyhow::Result<()> {
     bl.set_drive_strength(DriveStrength::I40mA).unwrap();
     bl.set_high().unwrap();
     mem::forget(bl); // TODO: For now
+    let text = "Hello World";
+    
     // some text stuff - I'll just print out errors onto the screen lol
     Text::with_alignment(
         text,
@@ -92,7 +93,6 @@ fn main() -> anyhow::Result<()> {
         FreeRtos::delay_ms(500);
 
         led.set_low()?;
-	let text = "Hello World";
 
 
         FreeRtos::delay_ms(500);
