@@ -12,8 +12,8 @@ opt-level = "s"
 debug = true # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
 
-[features]
-pio = ["esp-idf-sys/pio"]
+# [features]
+# pio = ["esp-idf-sys/pio"]
 
 [dependencies]
 anyhow = "1.0.69"
@@ -23,12 +23,16 @@ embedded-graphics = "0.7.1"
 embedded-graphics-core = "0.3.3"
 embedded-svc = "0.24.0"
 esp-idf-hal = "0.40.1"
-esp-idf-svc = {version="0.45.0", features=["alloc"]}
-esp-idf-sys = {version= "0.32.1", features = ["binstart", "panic_handler", "alloc_handler"], default-features = false }
+esp-idf-svc = {version="0.45.0", features=["alloc", "experimental"]}
+esp-idf-sys = {version= "0.32.1", features = ["binstart"] }
 gfx-xtra = "0.1.1"
+log = "0.4.17"
 mipidsi = "0.6.0"
-
-
+# esp-println = { version = "0.3.1", features = ["esp32s2"] }
+# esp32s2-hal = "0.7.0"
+# usb-device = "0.2.9"
+# esp-backtrace     = { version = "0.6.0", features = ["esp32s2", "panic-handler", "print-uart", "exception-handler"] }
+# usbd-serial = "0.1.1"
 [build-dependencies]
 embuild = "0.30.4"
 
