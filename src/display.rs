@@ -20,13 +20,6 @@ pub fn create_display(
     display_peripherals: DisplayPeripherals,
     driver: std::rc::Rc<SpiDriver<'static>>,
 ) -> anyhow::Result<impl Flushable<Color = Rgb565, Error = impl Debug + 'static> + 'static> {
-    // let display_power: Gpio21 = peripherals.pins.gpio21;
-
-    // power on the display
-    let mut vdd = PinDriver::output(display_peripherals.power)?;
-    vdd.set_high()?;
-    mem::forget(vdd);
-
     let spi_display = SpiDeviceDriver::new(
         driver,
         Some(display_peripherals.cs),

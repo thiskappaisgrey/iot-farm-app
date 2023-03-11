@@ -16,120 +16,134 @@ use esp_idf_hal::prelude::*;
 use esp_idf_hal::spi::*;
 // wifi stuff
 use anyhow::Context;
-use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi as SvcWifi};
-use esp_idf_hal::{delay::FreeRtos, modem::Modem};
-use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition, wifi::EspWifi};
 use esp_idf_hal::i2c::*;
 use esp_idf_hal::prelude::*;
+use esp_idf_hal::{delay::FreeRtos, modem::Modem};
 mod display;
 mod peripherals;
 use display::*;
 use log::*;
 use peripherals::*;
+mod wifi;
 
-// wifi ssid and password
+
+use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi as SvcWifi};
+use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition, wifi::EspWifi};
+use esp_idf_svc::http::client::{Configuration as HttpConfiguration, EspHttpConnection};
+use embedded_svc::{
+    http::{client::Client as HttpClient, Method, Status},
+    io::Write,
+    utils::io,
+};
 const SSID: &str = env!("WIFI_SSID");
 const PASS: &str = env!("WIFI_PASS");
+
+// wifi ssid and password
 
 mod soil;
 // TODO create the display
 const SOIL_ADDRESS: u8 = 0x36;
 
 // TODO then, figure out how to use the i2c soil sensor
-fn main() -> anyhow::Result<()> {
+fn soil_main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
     // TODO clean this code later, since I'd prob just want to copy anemometer's stuff
-    let peripherals = Peripherals::take().unwrap();
-    let mut led = PinDriver::output(peripherals.pins.gpio13)?;
+    // let peripherals = Peripherals::take().unwrap();
+    let peripherals = FeatherPeripherals::take();
+    let mut led = PinDriver::output(peripherals.led)?;
+    debug!("Powering on the vdd");
+    let mut vdd = PinDriver::output(peripherals.power)?;
+    vdd.set_high()?;
+    mem::forget(vdd);
 
-    // info!("initializing display");
-    // // the spi bus driver - I honestly don't know why we need this but we do..
-    // let driver = std::rc::Rc::new(
-    //     SpiDriver::new(
-    //         peripherals.spi2,
-    //         peripherals.pins.gpio36,
-    //         peripherals.pins.gpio35,
-    //         Some(peripherals.pins.gpio37),
-    //         Dma::Disabled,
-    //     )
-    //     .unwrap(),
-    // );
-    // let mut display = create_display(
-    //     DisplayPeripherals {
-    //         dc: peripherals.pins.gpio39.into(),
-    //         rst: peripherals.pins.gpio40.into(),
-    //         cs: peripherals.pins.gpio7.into(),
-    //         power: peripherals.pins.gpio21,
-    //     },
-    //     driver,
-    // )
-    // .unwrap();
-
-    // display.clear(Rgb565::BLACK).unwrap();
+    info!("initializing display");
+    // I can use monadic code "and_then" but that's annoying to write
+    // if display creation fails, I want to print an error
+    let mut display =
+        create_display(peripherals.display_peripherals, peripherals.spi_driver).unwrap();
+    display.clear(Rgb565::BLACK).unwrap();
 
     // // Enable the blacklight
-    // let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
-    // let backlight: AnyOutputPin = peripherals.pins.gpio45.into();
-    // let mut bl = PinDriver::output(backlight).unwrap();
-    // bl.set_drive_strength(DriveStrength::I40mA).unwrap();
-    // bl.set_high().unwrap();
-    // mem::forget(bl); // TODO: For now
-    
+    let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    let mut bl = PinDriver::output(peripherals.backlight).unwrap();
+    bl.set_drive_strength(DriveStrength::I40mA).unwrap();
+    bl.set_high().unwrap();
+    mem::forget(bl); // TODO: For now
+
     // TODO.. i2c - abstract this
     // I swapped the pins lmao
-    let scl = peripherals.pins.gpio41;
-    let sda = peripherals.pins.gpio42;
     // TODO power on the i2c
-    let i2c_power = peripherals.pins.gpio21;
-    info!("Toggling the i2c power pin");
-    let mut i2c_power_status = PinDriver::output(i2c_power).expect("Failed to get the  i2c power pin");
-    // read the i2c_power pin & toggle it
-    let power = i2c_power_status.is_set_high();
-    info!("i2c power is: {}", power);
-    // write t
-    // toggle the pin
-    i2c_power_status.toggle().expect("Failed to toggle the i2c power pin");
-    
+    let text = "Hello World";
+    // some text stuff - I'll just print out errors onto the screen lol
+    Text::with_alignment(
+        text,
+        display.bounding_box().center() + Point::new(0, 15),
+        character_style,
+        Alignment::Center,
+    )
+    .draw(&mut display)
+    .unwrap();
+
     info!("Starting I2C");
     let config = I2cConfig::new().baudrate(100.kHz().into());
-    let mut i2c = I2cDriver::new(peripherals.i2c0, sda, scl, &config)?;
+    let mut i2c = I2cDriver::new(
+        peripherals.i2c_peripherals.i2c,
+        peripherals.i2c_peripherals.sda,
+        peripherals.i2c_peripherals.scl,
+        &config,
+    )?;
+
     let soil_sensor = soil::SoilSensor::init(i2c);
     match soil_sensor {
-	Ok(mut sensor) => {
-	    info!("Found soil sensor: {:#}", sensor.addr);
-	    loop  {
-		// maybe upwraps here is not a good idea..
-		let temp = sensor.get_temp().unwrap();
-		let cap = sensor.get_capacitance().unwrap();
-		info!("Temperature is: {}C", temp);
-		info!("Capacitance is: {}", cap);
-		// delay
-		FreeRtos::delay_ms(250);
-	    }
+        Ok(mut sensor) => {
+            info!("Found soil sensor: {:#}", sensor.addr);
+            loop {
+                // maybe upwraps here is not a good idea..
+                let temp = sensor.get_temp().unwrap();
+                let cap = sensor.get_capacitance().unwrap();
+                info!("Temperature is: {}C", temp);
+                info!("Capacitance is: {}", cap);
+                led.toggle()?;
+                // delay
+                FreeRtos::delay_ms(250);
+            }
+        }
+        Err(err) => {
+            warn!("couldn't find soil sensor: {:#}", err)
+        }
+    }
+
+    Ok(())
+}
+// TODO  not sure why this doesnt'  work???
+fn main() -> anyhow::Result<()> {
+    esp_idf_sys::link_patches();
+    esp_idf_svc::log::EspLogger::initialize_default();
+    // // wifi::Network::connect_wifi(peripherals.wifi_peripherals).unwrap();
+    let peripherals = peripherals::FeatherPeripherals::take();
+
+    let network = wifi::Network::init(peripherals.wifi_peripherals);
+    match network {
+	// TODO wifi is dropped here
+	Ok(mut network) => {
+	    FreeRtos::delay_ms(5000);
+	    network.get_request().unwrap();
+	    // // // make the requests
+	    network.post_request().unwrap();
 	}
-	Err(err) => {
-	    warn!("couldn't find soil sensor: {:#}", err);
+	Err(e) => {
+	    warn!("can't connet to network: {e}")
 	}
     }
     
-    // let text = "Hello World";
-    // some text stuff - I'll just print out errors onto the screen lol
-    // Text::with_alignment(
-    //     text,
-    //     display.bounding_box().center() + Point::new(0, 15),
-    //     character_style,
-    //     Alignment::Center,
-    // )
-    // .draw(&mut display)
-    // .unwrap();
-
+    let mut led = PinDriver::output(peripherals.led)?;
+    
     loop {
-	// info!("toggling led");
-        // led.set_high()?;
-        // // we are sleeping here to make sure the watchdog isn't triggered
-        // FreeRtos::delay_ms(500);
-        // led.set_low()?;
-        // FreeRtos::delay_ms(500);
+	led.toggle()?;
+        // delay
+        FreeRtos::delay_ms(250);
+
     }
+    Ok(())
 }
