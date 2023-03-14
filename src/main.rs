@@ -1,5 +1,4 @@
 use core::mem;
-use display_interface_spi::SPIInterfaceNoCS;
 use embedded_graphics::{
     mono_font::{ascii::FONT_6X10, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -11,47 +10,48 @@ use embedded_graphics::{
     // mock_display::MockDisplay,
 };
 use esp_idf_hal::gpio::*;
-use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::prelude::*;
-use esp_idf_hal::spi::*;
 // wifi stuff
-use anyhow::Context;
 use esp_idf_hal::i2c::*;
-use esp_idf_hal::prelude::*;
-use esp_idf_hal::{delay::FreeRtos, modem::Modem};
+use esp_idf_hal::delay::FreeRtos;
 mod display;
 mod peripherals;
 use display::*;
+use gfx_xtra::draw_target::Flushable;
 use log::*;
 use peripherals::*;
-mod wifi;
-
-
-use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration, Wifi as SvcWifi};
-use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition, wifi::EspWifi};
-use esp_idf_svc::http::client::{Configuration as HttpConfiguration, EspHttpConnection};
-use embedded_svc::{
-    http::{client::Client as HttpClient, Method, Status},
-    io::Write,
-    utils::io,
-};
-const SSID: &str = env!("WIFI_SSID");
-const PASS: &str = env!("WIFI_PASS");
-
-// wifi ssid and password
-
+mod network;
+use soil::SoilSensor;
+use network::Network;
 mod soil;
-// TODO create the display
-const SOIL_ADDRESS: u8 = 0x36;
 
-// TODO then, figure out how to use the i2c soil sensor
-fn soil_main() -> anyhow::Result<()> {
+
+fn main_loop(mut network:  Network, mut soil_sensor: SoilSensor, mut led: PinDriver<AnyOutputPin, Output>, display: &mut impl Flushable <Color = Rgb565, Error = impl core::fmt::Debug + 'static>) -> anyhow::Result<()> {
+    loop {
+        // maybe upwraps here is not a good idea..
+        let temp = soil_sensor.get_temp().unwrap();
+        let cap = soil_sensor.get_capacitance().unwrap();
+        info!("Temperature is: {}C", temp);
+        info!("Capacitance is: {}", cap);
+	display::write_text_center( display, format!("Temp: {temp}C and Cap: {cap}").as_str()).unwrap();
+        led.toggle()?;
+	// make a get request
+	network.get_request()?;
+        // delay for 10 seconds to not spam the server
+        FreeRtos::delay_ms(5000);
+    }
+
+}
+
+
+
+fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
     // TODO clean this code later, since I'd prob just want to copy anemometer's stuff
     // let peripherals = Peripherals::take().unwrap();
     let peripherals = FeatherPeripherals::take();
-    let mut led = PinDriver::output(peripherals.led)?;
+    let led = PinDriver::output(peripherals.led)?;
     debug!("Powering on the vdd");
     let mut vdd = PinDriver::output(peripherals.power)?;
     vdd.set_high()?;
@@ -60,6 +60,8 @@ fn soil_main() -> anyhow::Result<()> {
     info!("initializing display");
     // I can use monadic code "and_then" but that's annoying to write
     // if display creation fails, I want to print an error
+    
+    // TODO abstract the display in a builder pattern
     let mut display =
         create_display(peripherals.display_peripherals, peripherals.spi_driver).unwrap();
     display.clear(Rgb565::BLACK).unwrap();
@@ -74,76 +76,44 @@ fn soil_main() -> anyhow::Result<()> {
     // TODO.. i2c - abstract this
     // I swapped the pins lmao
     // TODO power on the i2c
-    let text = "Hello World";
-    // some text stuff - I'll just print out errors onto the screen lol
-    Text::with_alignment(
-        text,
-        display.bounding_box().center() + Point::new(0, 15),
-        character_style,
-        Alignment::Center,
-    )
-    .draw(&mut display)
-    .unwrap();
-
+    let text = "Hello! Initializing wifi!";
+    // TODO abstract into display module
+    display::write_text_center(&mut display, text).unwrap();
+    
     info!("Starting I2C");
     let config = I2cConfig::new().baudrate(100.kHz().into());
-    let mut i2c = I2cDriver::new(
+    let i2c = I2cDriver::new(
         peripherals.i2c_peripherals.i2c,
         peripherals.i2c_peripherals.sda,
         peripherals.i2c_peripherals.scl,
         &config,
     )?;
 
-    let soil_sensor = soil::SoilSensor::init(i2c);
-    match soil_sensor {
-        Ok(mut sensor) => {
-            info!("Found soil sensor: {:#}", sensor.addr);
-            loop {
-                // maybe upwraps here is not a good idea..
-                let temp = sensor.get_temp().unwrap();
-                let cap = sensor.get_capacitance().unwrap();
-                info!("Temperature is: {}C", temp);
-                info!("Capacitance is: {}", cap);
-                led.toggle()?;
-                // delay
-                FreeRtos::delay_ms(250);
-            }
-        }
-        Err(err) => {
-            warn!("couldn't find soil sensor: {:#}", err)
-        }
-    }
-
-    Ok(())
-}
-// TODO  not sure why this doesnt'  work???
-fn main() -> anyhow::Result<()> {
-    esp_idf_sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
-    // // wifi::Network::connect_wifi(peripherals.wifi_peripherals).unwrap();
-    let peripherals = peripherals::FeatherPeripherals::take();
-
-    let network = wifi::Network::init(peripherals.wifi_peripherals);
-    match network {
-	// TODO wifi is dropped here
-	Ok(mut network) => {
-	    FreeRtos::delay_ms(5000);
-	    network.get_request().unwrap();
-	    // // // make the requests
-	    network.post_request().unwrap();
-	}
-	Err(e) => {
-	    warn!("can't connet to network: {e}")
-	}
-    }
+    info!("Starting network and soil sensor");
     
-    let mut led = PinDriver::output(peripherals.led)?;
-    
-    loop {
-	led.toggle()?;
-        // delay
-        FreeRtos::delay_ms(250);
+    // TODO stop the program when network fails - I can use map_or_else or something else to handle errors
+    // TODO for now, I'll just write monadic code
+    let val: anyhow::Result<()> = network::Network::init(peripherals.wifi_peripherals).and_then(|network| {
+	soil::SoilSensor::init(i2c).and_then(|soil_sensor| {
+	    main_loop(network, soil_sensor,  led, &mut display)
+	})
+    });
+    // // TODO unwrap the error - since main_loop loops, the code will never get here unless there is an error
+    match val {
+	Ok(()) => {
+	    info!("unexpected");
+	    loop {}
+	}
+	Err(err) => {
+	    // TODO probably want some sort of text wrapping.. errors dont' look good on screen
+	    let txt: String = err.to_string();
+	    error!("Error in initializing the main loop: {}", txt);
+	    display::write_text_center(&mut display, format!("Error in initializing main loop: {txt}").as_str()).unwrap();
+	}
+   } 
+    loop {}
+    // TODO https://learn.adafruit.com/adafruit-esp32-s2-tft-feather/storage
+    // It'd be nice to write values to storage when network is not available or something
 
-    }
-    Ok(())
 }
+

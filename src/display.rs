@@ -16,6 +16,7 @@ use core::fmt::Debug;
 use std::mem;
 use mipidsi::{Builder, Orientation};
 
+
 pub fn create_display(
     display_peripherals: DisplayPeripherals,
     driver: std::rc::Rc<SpiDriver<'static>>,
@@ -40,4 +41,22 @@ pub fn create_display(
     let display = display.owned_noop_flushing();
 
     Ok(display)
+}
+
+pub fn write_text_center<D>(display: &mut D, text: &str) -> Result<(), D::Error>
+where
+    D: Flushable<Color = Rgb565>,
+    D::Error: Debug,
+{
+    let character_style = MonoTextStyle::new(&FONT_6X10, Rgb565::WHITE);
+    // clear the display first
+    display.clear(Rgb565::BLACK).unwrap();
+    Text::with_alignment(
+	text,
+	display.bounding_box().center() + Point::new(0, 15),
+	character_style,
+	Alignment::Center,
+    )
+	.draw(display)?;
+    Ok(())
 }

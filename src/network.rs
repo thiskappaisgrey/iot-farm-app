@@ -11,22 +11,22 @@ use crate::peripherals::WifiPeripherals;
 use log::*;
 pub struct Network {
     client:  HttpClient<EspHttpConnection>,
-    wifi: EspWifi<'static>
+    _wifi: EspWifi<'static>
 }
-
+use anyhow::anyhow;
 // TODO
 const SSID: &str = env!("WIFI_SSID");
 const PASS: &str = env!("WIFI_PASS");
 impl Network {
     pub fn init(peripherals: WifiPeripherals) -> anyhow::Result<Self> {
-	let wifi = Self::connect_wifi(peripherals)?;
+	let _wifi = Self::connect_wifi(peripherals)?;
 	let client = HttpClient::wrap(EspHttpConnection::new(&HttpConfiguration {
             crt_bundle_attach: Some(esp_idf_sys::esp_crt_bundle_attach), // Needed for HTTPS support
             ..Default::default()
 	})?);
 	Ok(Network {
 	    client,
-	    wifi
+	    _wifi
 	})
     }
     // TODO this doesn't work b/c sysloop and/or nvs_default_partition gets dropped - so the wifi gets disconnected..
@@ -74,7 +74,7 @@ impl Network {
 		}
 	    }
 	}
-
+	let mut tries = 0;
 	loop {
 	    match wifi_driver.is_connected() {
 		Ok(true) => {
@@ -96,8 +96,12 @@ impl Network {
 		#[cfg(debug_assertions)]
 		println!("Error while connecting wifi driver: {_e:?}")
 	    }
-
+	    if tries > 10 {
+		return Err(anyhow!("Tries exceeded 10. Stopping connection to wifi."));
+	    }
+	    tries +=  1;
 	    FreeRtos::delay_ms(1000);
+	    
 	}
 
 
@@ -108,7 +112,7 @@ impl Network {
     // TODO https://github.com/esp-rs/esp-idf-svc/blob/master/examples/http_request.rs#L12
     // figure out how to make get/post requests to local network
     // TODO wrap the wifi client in a builder
-    // TODO
+    // TODO make a get request to my local network server
     pub fn get_request(&mut self) -> anyhow::Result<()> {
 	// Prepare headers and URL
 	let headers = [("accept", "text/plain"), ("connection", "close")];
@@ -143,6 +147,7 @@ impl Network {
 
 	Ok(())
     }
+    // TODO make a post request to my flask server
     pub fn post_request(&mut self) -> anyhow::Result<()> {
 	// Prepare payload
 	let payload = b"Hello world!";
