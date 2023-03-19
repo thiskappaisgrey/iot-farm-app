@@ -25,18 +25,21 @@ use soil::SoilSensor;
 use network::Network;
 mod soil;
 
-
+// The  "main loop" after getting all of the peripherals
 fn main_loop(mut network:  Network, mut soil_sensor: SoilSensor, mut led: PinDriver<AnyOutputPin, Output>, display: &mut impl Flushable <Color = Rgb565, Error = impl core::fmt::Debug + 'static>) -> anyhow::Result<()> {
     loop {
         // maybe upwraps here is not a good idea..
-        let temp = soil_sensor.get_temp().unwrap();
+	
+        let temp: u16 = unsafe { soil_sensor.get_temp().unwrap().to_int_unchecked::<u16>() };
         let cap = soil_sensor.get_capacitance().unwrap();
         info!("Temperature is: {}C", temp);
         info!("Capacitance is: {}", cap);
 	display::write_text_center( display, format!("Temp: {temp}C and Cap: {cap}").as_str()).unwrap();
         led.toggle()?;
-	// make a get request
-	network.get_request()?;
+	// network requests have some panics..
+	if let Err(e) = network.put_request(temp, cap) {
+	    error!("error with request {e}");
+	}
         // delay for 10 seconds to not spam the server
         FreeRtos::delay_ms(5000);
     }
@@ -98,7 +101,7 @@ fn main() -> anyhow::Result<()> {
 	    main_loop(network, soil_sensor,  led, &mut display)
 	})
     });
-    // // TODO unwrap the error - since main_loop loops, the code will never get here unless there is an error
+    // // TODO unwrap the error - since main_loop loops, the code will (hopefully) never get here unless there is an error
     match val {
 	Ok(()) => {
 	    info!("unexpected");
@@ -112,8 +115,6 @@ fn main() -> anyhow::Result<()> {
 	}
    } 
     loop {}
-    // TODO https://learn.adafruit.com/adafruit-esp32-s2-tft-feather/storage
-    // It'd be nice to write values to storage when network is not available or something
 
 }
 

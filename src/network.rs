@@ -10,31 +10,37 @@ use embedded_svc::{
 use crate::peripherals::WifiPeripherals;
 use log::*;
 pub struct Network {
-    client:  HttpClient<EspHttpConnection>,
+    // client:  HttpClient<EspHttpConnection>,
     _wifi: EspWifi<'static>
 }
 use anyhow::anyhow;
-// TODO
+
+
+/* Configure all of these environment variables in the
+<project-root>/.cargo/config.toml
+Example:
+[env]
+WIFI_SSID="123"
+WIFI_PASS="pass"
+SERVER_ADDR="http://<ip>"
+ */
+
 const SSID: &str = env!("WIFI_SSID");
 const PASS: &str = env!("WIFI_PASS");
+const SERVER_ADDR: &str = env!("SERVER_ADDR");
+
 impl Network {
+    // Use the builder pattern to build a "Network" object. Tbh, dont' really need this.
     pub fn init(peripherals: WifiPeripherals) -> anyhow::Result<Self> {
 	let _wifi = Self::connect_wifi(peripherals)?;
-	let client = HttpClient::wrap(EspHttpConnection::new(&HttpConfiguration {
-            crt_bundle_attach: Some(esp_idf_sys::esp_crt_bundle_attach), // Needed for HTTPS support
-            ..Default::default()
-	})?);
 	Ok(Network {
-	    client,
 	    _wifi
 	})
     }
-    // TODO this doesn't work b/c sysloop and/or nvs_default_partition gets dropped - so the wifi gets disconnected..
-    // you need to return an EspWifi<'static> basically - rather than nothing - so wifi doesn't get dropped
+    
+    // Connect to the wifi and return the reference
     pub fn connect_wifi(peripherals: WifiPeripherals) -> anyhow::Result<EspWifi<'static>> {
-        // TODO use the log crate to prop error to display
         // Wifi stuff
-        // TODO this doesn't actually work on eduroam
         // monitor: https://stackoverflow.com/questions/75540291/esp32-wifi-wpa2-enterprise-on-rust
         // low level bindings in esp-idf-sys might help..
 	let eventloop = EspSystemEventLoop::take()?;
@@ -50,7 +56,7 @@ impl Network {
                 // See .cargo/config.toml to set WIFI_SSID and WIFI_PWD env variables
                 ssid: SSID.into(),
                 password: PASS.into(),
-                auth_method: AuthMethod::WPA2WPA3Personal,
+                auth_method: AuthMethod::WPA2Personal,
                 ..Default::default()
             }))?;
             
@@ -109,21 +115,26 @@ impl Network {
 	Ok(wifi_driver)
 
     }
-    // TODO https://github.com/esp-rs/esp-idf-svc/blob/master/examples/http_request.rs#L12
-    // figure out how to make get/post requests to local network
-    // TODO wrap the wifi client in a builder
-    // TODO make a get request to my local network server
+    // Make a get request to the sensors server
     pub fn get_request(&mut self) -> anyhow::Result<()> {
+	let mut client = HttpClient::wrap(EspHttpConnection::new(&HttpConfiguration {
+            crt_bundle_attach: Some(esp_idf_sys::esp_crt_bundle_attach), // Needed for HTTPS support
+            ..Default::default()
+	})?);
+
 	// Prepare headers and URL
 	let headers = [("accept", "text/plain"), ("connection", "close")];
-	let url = "http://ifconfig.net/";
+	// get the data I guess
+	let url = format!("{SERVER_ADDR}/data");
+	// let url = "http://ifconfig.net/";
 
 	// Send request
 	//
 	// Note: If you don't want to pass in any headers, you can also use `client.get(url, headers)`.
-	let request = self.client.request(Method::Get, url, &headers)?;
+	let request = client.request(Method::Get, &url, &headers)?;
 	info!("-> GET {url}");
 	
+	// there's an error here
 	let mut response = request.submit()?;
 
 	// Process response
@@ -147,24 +158,26 @@ impl Network {
 
 	Ok(())
     }
-    // TODO make a post request to my flask server
-    pub fn post_request(&mut self) -> anyhow::Result<()> {
-	// Prepare payload
-	let payload = b"Hello world!";
-
+    // make a put request to my flask server and send logging data there
+    pub fn put_request(&mut self, temp: u16, capacitance: u16) -> anyhow::Result<()> {
+	let mut client = HttpClient::wrap(EspHttpConnection::new(&HttpConfiguration {
+            crt_bundle_attach: Some(esp_idf_sys::esp_crt_bundle_attach), // Needed for HTTPS support
+            ..Default::default()
+	})?);
+	
 	// Prepare headers and URL
-	let content_length_header = format!("{}", payload.len());
+	// let content_length_header = format!("{}", payload.len());
 	let headers = [
             ("accept", "text/plain"),
             ("content-type", "text/plain"),
             ("connection", "close"),
-            ("content-length", &*content_length_header),
 	];
-	let url = "http://example.org/";
+	// TODO 
+	let url = format!("{SERVER_ADDR}/api/addsensorlog/?sensor_id=1&temperature={temp}&capacitance={capacitance}&api_key=w23cs190bherbfarmproject");
 
 	// Send request
-	let mut request = self.client.post(url, &headers)?;
-	request.write_all(payload)?;
+	let mut request = client.put(&url, &headers)?;
+	// request.write_all(payload)?;
 	request.flush()?;
 	info!("-> POST {url}");
 	let mut response = request.submit()?;

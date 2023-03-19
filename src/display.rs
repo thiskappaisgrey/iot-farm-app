@@ -16,7 +16,7 @@ use core::fmt::Debug;
 use std::mem;
 use mipidsi::{Builder, Orientation};
 
-
+// create the display object
 pub fn create_display(
     display_peripherals: DisplayPeripherals,
     driver: std::rc::Rc<SpiDriver<'static>>,
@@ -43,6 +43,7 @@ pub fn create_display(
     Ok(display)
 }
 
+// Write the text to the center of the screen - clearing the screen first
 pub fn write_text_center<D>(display: &mut D, text: &str) -> Result<(), D::Error>
 where
     D: Flushable<Color = Rgb565>,

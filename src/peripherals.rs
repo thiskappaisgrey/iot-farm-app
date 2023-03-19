@@ -21,7 +21,6 @@ pub struct WifiPeripherals {
 }
 pub struct FeatherPeripherals {
     pub display_peripherals: DisplayPeripherals,
-    // TODO I can also make this an RC - if many devices uses the SPI driver
     pub spi_driver: Rc<SpiDriver<'static>>,
     pub led: AnyOutputPin,
     pub i2c_peripherals: I2cPeripherals,
@@ -31,6 +30,7 @@ pub struct FeatherPeripherals {
 }
 
 impl FeatherPeripherals {
+    // Get all of the peripherals of the feather using the builder pattern
     pub fn take() -> Self {
 	let peripherals = Peripherals::take().unwrap();
 	let spi_driver = std::rc::Rc::new(

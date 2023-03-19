@@ -39,11 +39,10 @@ pub enum SoilSensErr {
     // },
 }
 
-// TODO figure out how to read from the soil sensor
 // https://github.com/cfsamson/embedded-stemma-soil-sensor/blob/master/src/lib.rs
 // https://github.com/esp-rs/esp-idf-hal/blob/master/examples/i2c_ssd1306.rs
-
 impl SoilSensor {
+    // Create a soil sensor using the builder pattern
     pub fn init(mut i2c: I2cDriver<'static>) -> anyhow::Result<Self> {
 	info!("initializing soil sensor");
 	// Scan for the soil sensor
@@ -83,6 +82,7 @@ impl SoilSensor {
 
 
     }
+    // Get the temperature reading from the soil sensor
     pub fn get_temp(&mut self) -> anyhow::Result<f32> {
         let l_reg = SEESAW_STATUS_BASE;
         let h_reg = SEESAW_STATUS_TEMP;
@@ -96,6 +96,7 @@ impl SoilSensor {
         let temp_celsius = (1.0 / (1u32 << 16) as f32) * tmp_val;
         Ok(temp_celsius)
     }
+    // get the capacitance reading from the soil sensor
     pub fn get_capacitance(&mut self) -> anyhow::Result<u16> {
         let l_reg: u8 = SEESAW_TOUCH_BASE;
         let h_reg: u8 = SEESAW_TOUCH_CHANNEL_OFFSET;
@@ -120,7 +121,7 @@ impl SoilSensor {
 
         Err(SoilSensErr::MoistureReadErr.into())
     }
-
+    // read from an i2c register after connecting to the device
     pub fn read(&mut self, reg_low: u8, reg_high: u8, buff: &mut [u8], delay_us: u32) -> anyhow::Result<()> {
 	self.i2c.write(self.addr, &[reg_low, reg_high], BLOCK)?;
 	esp_idf_hal::delay::FreeRtos::delay_us(delay_us);
@@ -128,7 +129,8 @@ impl SoilSensor {
 	Ok(())
     }
 }
-// check hardware code through i2c
+
+// try to find hardware on i2c address
 fn try_read_hw(i2c: &mut I2cDriver, addr: u8) -> anyhow::Result<u8>{
     let reg_low = SEESAW_STATUS_BASE;
     let reg_high = SEESAW_STATUS_HW_ID;
